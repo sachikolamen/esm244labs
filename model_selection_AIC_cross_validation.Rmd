@@ -69,11 +69,106 @@ AICcmodavg::aictab(list(mdl1, mdl2, mdl3))
 
 ```
 
-*AIC is only specific to the model for the data that you have, might not be good at predicting model fit for other data sets!*
+*AIC is only estimating the parameters for data that you have, might not be good at predicting parameters/best model for other data sets!*
 
-Cross validation is a way to try to predict outcomes for OTHER data sets!
+Cross validation is a way to try to predict the performance of the model vased on data it HASNT SEEN YET.
 
+# Lets try K-fold Cross-Validation
+K = how many slices you will have in your data
 
+```{r}
+folds <- 10 # how many folds you will have in your data
+fold_vec <- rep(1:folds, length.out = nrow(penguins_clean)) # rep() is repeat function until it meets criteria, length.out() until it gets to the number of observation (333)
+table(fold_vec) # shows a table of values for each fold??
+
+# we will scramble this and use it to assign different observations in the dataset randomly to different folds. 
+
+set.seed(42) # whenever working with random numbers its a good idea to set a seed so if someone else comes along and wants to verify your process, they can get exactly the same random numbers. 
+
+penguins_fold <- penguins_clean %>%
+  mutate(group = sample(fold_vec, size = n(), replace = FALSE))
+# add new column named 'group' that contains the samples from the fold_vec that has a smaple size of the data frame (333), replace = FALSE guarantees that we will end up with exact distribution as seen in table
+         
+### First Fold
+test_df <- penguins_fold %>%
+  filter(group == 1)
+
+training_df <- penguins_fold %>%
+  filter(group != 1)
+```
+
+Need to have a way of scoring models, create funciton:
+*Root Mean Square Error* go in reverse order of these operations. Why is the anagram fucked up... cause why not?
+- find error (predicted - actual)
+- square it
+- find the average
+- take the square root
+
+```{r root mean square error function}
+calc_rmse <- function(x,y) {rmse_result <- (x - y)^2 %>% mean() %>% sqrt()
+return(rmse_result)}
+```
+
+Use training dataset to create three linear regression models based on the formulas above
+
+```{r}
+training_mdl1 <- lm(f1, data = training_df)
+training_mdl2 <- lm(f2, data = training_df)
+training_mdl3 <- lm(f3, data = training_df)
+```
+
+Use trained models to predict on test data
+```{r}
+predict_test <- test_df %>%
+  mutate(model1 = predict(training_mdl1, test_df),
+         model2 = predict(training_mdl2, test_df),
+         model3 = predict(training_mdl3, test_df)) # predict() takes parameters from model object and uses it to predict based on a different data frame
+
+rmse_predict_test <- predict_test %>%
+  summarize(rmse_mdl1 = calc_rmse(model1, mass),
+            rmse_mdl2 = calc_rmse(model2, mass),
+            rmse_mdl3 = calc_rmse(model3, mass))
+
+rmse_predict_test
+#  rmse_mdl1 rmse_mdl2 rmse_mdl3
+#      <dbl>     <dbl>     <dbl>
+# 1      326.      319.      327.
+
+# we see that model2 is best for this fold.
+```
+
+Lets calculate over ALL folds and take an average (use a for loop)
+
+```{r}
+rmse_df <-data.frame() # data.frame() is just a blank data frame
+
+for(i in 1:folds) {
+  kfold_test_df <- penguins_fold %>%
+    filter(group == i)
+  kfold_train_df <- penguins_fold %>%
+    filter(group != i)
+  
+  kfold_mdl1 <- lm(f1, data = kfold_train_df)
+  kfold_mdl2 <- lm(f2, data = kfold_train_df)
+  kfold_mdl3 <- lm(f3, data = kfold_train_df)
+  
+  kfold_pred_df <- kfold_test_df %>%
+    mutate(mdl1 = predict(kfold_mdl1, kfold_test_df),
+           mdl2 = predict(kfold_mdl2, .),
+           mdl3 = predict(kfold_mdl3, .))
+  kfold_rmse <- kfold_pred_df %>%
+    summarize(rmse_mdl1 = calc_rmse(mdl1, mass),
+              rmse_mdl2 = calc_rmse(mdl2, mass),
+              rmse_mdl3 = calc_rmse(mdl3, mass))
+  
+  rmse_df <- bind_rows(rmse_df, kfold_rmse) # this will add new row on bottom of data frame each time through the loop
+}
+
+rmse_df %>%
+  summarise(mean_rmse_mdl1 = mean(rmse_mdl1),
+            mean_rmse_mdl2 = mean(rmse_mdl2),
+            mean_rmse_mdl3 = mean(rmse_mdl3))
+```
 
 
 
