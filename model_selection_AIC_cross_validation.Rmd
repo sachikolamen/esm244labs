@@ -1,0 +1,83 @@
+---
+title: 'Model Selection: AIC and Cross Validation'
+author: "Sachiko Lamen"
+date: "1/13/2022"
+output: html_document
+---
+
+```{r setup, include=TRUE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(palmerpenguins)
+library(AICcmodavg)
+library(equatiomatic)
+```
+
+# Objectives
+* Practice comparing the performance of different linear regression models using AIC and cross-validation
+* learn to use formulas in R models
+* use a for-loop to perform cross-validaiton manually
+
+# Create a model that will predict penguin mass based on observable characteristics
+Create a model we can use in the field to estimate penguin mass based on readily observable characteristics, based on data in the `palmerpenguins` packages
+
+```{r}
+penguins_clean <- penguins %>%
+  drop_na() %>%
+  rename(mass = body_mass_g,
+         bill_l = bill_length_mm,
+         bill_d = bill_depth_mm,
+         flipper_l = flipper_length_mm) # rename column names to make it easier to work with
+
+mdl1 <- lm(mass ~ bill_l + bill_d + flipper_l + species + sex + island,
+           data = penguins_clean) # `~` means 'as a function of'
+
+# see that model predicts 87% of variation, lots of parameter estimates have high levels of significance and others do not. This could help decide what variables to drop or keep. Overall model has pretty good p value
+```
+
+Lets use a formula!
+
+```{r}
+f1 <- mass ~ bill_l + bill_d + flipper_l + species + sex + island # now a stored object to be used later!
+mdl1 <- lm(f1, data = penguins_clean)
+
+f2 <- mass ~ bill_l + bill_d + flipper_l + species + sex
+mdl2 <- lm(f2, data = penguins_clean)
+
+f3 <- mass ~ bill_d + flipper_l + species +sex
+mdl3 <- lm(f3, data = penguins_clean)
+```
+
+Which of the three models is the "best"? Best fit with least complexity
+
+# Lets use AIC to compare
+- AIC function is built in to R
+
+```{r}
+AIC(mdl1, mdl2, mdl3)
+
+# df = 2+number of parameters its trying to estimate
+# it looks like model 2 is best (lowest AIC)
+
+# keep in mind that if you had a small sample size (not this case), you would want to correct for having a small sample size using `AICc()` 
+AICcmodavg::AICc(mdl1) # AICc: 4727.925 versus AIC: 4727.242
+
+# can directly compare all three using `aictab(list(x,y,z))` that makes a nice viewing table 
+AICcmodavg::aictab(list(mdl1, mdl2, mdl3))
+# gives list in order of best to worst AIC and gives K value and ∆AIC  (remember you want at least 2 unit difference to consider one better than the other) :: model 2 is considered better than model 1 or 3, model 1 and 3 do not differ significantly.
+# AICcWt tells us the weight of the difference, bigger ∆AIC, means bigger weight of the evidence for the model. in this case 80% of the weight of evidence suggest model 2.
+
+```
+
+*AIC is only specific to the model for the data that you have, might not be good at predicting model fit for other data sets!*
+
+Cross validation is a way to try to predict outcomes for OTHER data sets!
+
+
+
+
+
+
+
+
+
