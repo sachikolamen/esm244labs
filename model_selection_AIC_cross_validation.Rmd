@@ -170,8 +170,19 @@ rmse_df %>%
             mean_rmse_mdl3 = mean(rmse_mdl3))
 ```
 
+# Once we've chosen the model via cross-validation: 
+Go back and train the final model (`final_mdl`) based on the formula for the model that you have chosen (`f2`)
 
+```{r}
+final_mdl <-lm(f2, data = penguins_clean)
 
+summary(final_mdl)
+```
+Our Final Model with VARIABLES
+`r equatiomatic::extract_eq(final_mdl, wrap = TRUE)` use extract_eq() to nicely format formula easily
+
+And with NUMBERS
+`r equatiomatic::extract_eq(final_mdl, wrap = TRUE, use_coefs = TRUE)`
 
 
 
