@@ -32,7 +32,8 @@ ui <- fluidPage(
                                              "Orange Orange" = "orange"))
                      ), # end sidebar panel
         mainPanel("Put my graph here",
-                  plotOutput(outputId = "penguin_plot")
+                  plotOutput(outputId = "penguin_plot"),
+                  tableOutput(outputId = "penguin_table")
                   ) # end mainPanel
     ) # end sidebarLayout
 )
@@ -44,10 +45,24 @@ server <- function(input, output) {
             filter(species == input$penguin_species) # looks specifically at input labeled penguin species (from UI)
     }) # end penguin_select reactive
 
+    penguin_table <- reactive({
+        penguins %>%
+            filter(species == input$penguin_species) %>%
+            group_by(sex) %>%
+            summarize(mean_flip = mean(flipper_length_mm),
+                      mean_mass = mean(body_mass_g))
+    }) # end penguin_table reactive
+
+# create a reactive plot that depends on 'species' widget selection:
     output$penguin_plot <- renderPlot({
         ggplot(data = penguin_select(), aes(x = flipper_length_mm, y = body_mass_g)) +
             geom_point(color = input$pt_color)
-    })
+    }) # end penguin_plot output
+
+    output$penguin_table <- renderTable({
+        penguin_table()
+    }) # end penguin_table output
+
 }
 
 # Combine into an app to run:
