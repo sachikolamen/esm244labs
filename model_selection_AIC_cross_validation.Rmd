@@ -87,7 +87,7 @@ set.seed(42) # whenever working with random numbers its a good idea to set a see
 
 penguins_fold <- penguins_clean %>%
   mutate(group = sample(fold_vec, size = n(), replace = FALSE))
-# add new column named 'group' that contains the samples from the fold_vec that has a smaple size of the data frame (333), replace = FALSE guarantees that we will end up with exact distribution as seen in table
+# add new column named 'group' that contains the samples from the fold_vec that has a samaple size of the data frame (333), replace = FALSE guarantees that we will end up with exact distribution as seen in table
          
 ### First Fold
 test_df <- penguins_fold %>%

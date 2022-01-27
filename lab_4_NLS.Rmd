@@ -1,0 +1,183 @@
+---
+title: "Lab_NLS"
+author: "Sachiko Lamen"
+date: "1/26/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(Metrics)
+library(cowplot)
+library(purrr)
+library(here)
+```
+
+```{r}
+load(here("lab_4_data", "fish_data.Rdata"))
+timeseries_values_views<-read_csv(here("lab_4_data", "timeseries_values_views"))
+```
+
+### Compute Surplus
+
+\[
+s_t=B_(t+1)-B_t+C_t
+\]
+
+```{r}
+surplus <- Fish_data %>%
+  group_by(stockid) %>%
+  select(stockid, year, TBbest, TCbest) %>%
+  drop_na() %>%
+  mutate(f_biomass = lead(TBbest)) %>% # lead() takes proceeding data and moves it by one index up and replicates the rest of the data down
+  mutate(surplus = f_biomass - TBbest + TCbest) %>%
+  drop_na() %>%
+  select(-f_biomass)
+```
+
+### Build a Fox Model
+Fisheries model -- typically the most conservative
+- predictes the expected surplus by taking the base of the natural log (e) and multiplying it by the maximum sustainable yield (biggest amount of fish that can be extracted at a sustainable rate == growth rate) and biomass/carrying capacity
+- want to use NLS because the log term would make it a nightmare to translate otherwise
+
+\[
+\hat s_t=-e*MSY*(\frac)B_t)(K))\ln(\frac(B_t)(K))
+\]
+
+```{r}
+fox <- function(m, carry, biomass){ # m = MSY
+  out = -2.718*m*(biomass/carry)*log(biomass/carry)
+  
+  return(out)
+}
+```
+
+```{r}
+# check out one species in the data 
+one_stock <- surplus %>%
+  filter(stockid == "COD1f-XIV")
+
+ggplot(data = one_stock, aes(x = year, y = surplus)) +
+  geom_point(size = 3) +
+  theme_minimal()
+
+# graph looks super random, but using the fox model we could pick out any data point and if we can create a sufficient MSY and carrying capacity, maybe we might be able to exactly replicate every single predicted data point. Thats what NLS is going to do. It will try to find a point that minimizes the distance at every single level of the year, by fitting it to our fox model. The question is: is the fox model better at fitting it, or is it truly just a random collection of data?
+```
+
+
+### Single Species NLS
+- we have our data
+- we have our model (fox model)
+- now we need to provide a guess
+  - we will use theory to help us make a guess
+  - in fox model the theory is that the maximum sustainable yield should be 37% of the carrying capacity, but we need to know the carrying capacity...
+  - upper limit of the population = good way to approximate carrying capacity
+  - in our data lets find the highest number
+
+```{r}
+guess_vec = c(max(one_stock$TBbest)*0.37, max(one_stock$TBbest))
+
+one_stock_nls = nls(surplus~fox(m, carry, TBbest), # look for the surplus column in this data frame and look for the biomass column in this data frame
+                    data = one_stock,
+                    start = list(m = guess_vec[1], carry = guess_vec[2]),
+                    trace = TRUE)
+
+summary(one_stock_nls)
+
+
+# apparently this shows that the fox model is a good fit for predicting this fish stock:
+# converged in 5 iterations (thats fast and powerful!)
+# had a very small tolerance level
+# nice parameter values
+
+# but need to see if fox model is good to predict for ALL stocks
+# need to run NLS across all stocks using `purrr` package
+
+```
+### Using `purrr` to run many nls models
+
+`purrr::map()` applies a funciton to each element of a list or atomic vector
+specify what data you want to put in and what function you want
+
+```{r}
+# make sure to specify formula that will work in a map context
+
+all_nls_fcn <- function(surplus_df){
+  nls(surplus~fox(m, carry, TBbest),
+      data = surplus_df,
+      start = list(m = max(surplus_df$TBbest)*0.37, carry = max(surplus_df$TBbest)))
+}
+
+# now we can begin piping
+
+fox_all <-surplus %>%
+  group_by(stockid) %>%
+  nest() %>% # take all the groups and condense the data into essentially one list and pack that list into a df index
+  mutate(nls_model = map(data, ~all_nls_fcn(.x))) %>% # data = new data column that was added when using nest(), ~ tells R to take the other input that we are giving it and pass it along in form of .x -- take whats in the data column and put it into our funciton. Thus far we have run NLS on all the stocks and created a new column called nls_model that contains model outputs. Now, we need to figure out how to use these NLS models. Lets make predictions based on the NLS models. Usually you would take the models and run them through the predict() but instead we can use map() to do it all at the same time
+  mutate(predictions = map2(nls_model, data, ~predict(.x, newdata = .y))) %>% # use map2() which adds extra y term so we can pass two parcels of information (eg. data and model), pmap() lets you have larger numbers of inputs. Last step to calculate RMSE so we can compare fox models with null random model. 
+  mutate(RMSE = map2_dbl(predictions, data, ~rmse(.x,.y$surplus))) # map2_dbl gives us numbers (double means number in R)
+
+```
+
+### Compare to a null model
+
+```{r}
+# use average to predict future stock. if the average can predict accurately then we dont need our fancy fox model
+
+# make function
+r_avg <-function(surplus){
+  avg_surplus = mean(surplus)
+  
+  rmse = sqrt(mean((avg_surplus - surplus)^2))
+  
+  return(rmse)
+}
+
+# use purrr to get dataframe with RMSE values
+rmse <- surplus %>%
+  group_by(stockid) %>%
+  nest() %>%
+  mutate(RMSE = map_dbl(data, ~ r_avg(.x$surplus)))
+
+# want to compare fox model RMSE to null model RMSE
+# use which() to directly compare them
+which(rmse$RMSE<fox_all$RMSE)
+```
+
+### Lets make a graph of the top 5 best fit NLS models
+
+```{r}
+# make a data frame called plots
+plots <- fox_all %>%
+  arrange(RMSE) %>%
+  head(5) %>%
+  mutate(graph = map2(data, predictions, ~ggplot() + 
+                        geom_point(data = .x, aes(x = .x$year, y = .x$surplus, color = "Actual")) +
+                        geom_point(aes(x = .x$year, y = .y, color = "Predicted"))) +
+           theme_minimal() +
+           xlab("Year") +
+           ylab("Surplus") +
+           scale_Color_manual(name = "Legend", breaks = c("Actual", "Predicted"), values = c("Actual" = "black", "Predicted" = "red")))
+
+legend <- get_legend(plots$graph[[1]])
+
+for(i in 1:length(plots$graph))[
+  plots$graph[[i]] <- plots$graph[[i]] +theme(legend.position = "none")
+]
+
+plot_list[[6]] <- legend
+plot_grid(plotlist = plots_list, labels = c(plots$stockid, ""), hjust = -0.5)
+
+```
+
+
+
+
+
+
+
+
+
+
+
