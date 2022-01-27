@@ -1,0 +1,98 @@
+---
+title: "NLS"
+author: "Sachiko Lamen"
+date: "1/26/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+remotes::install_github("lter/lterdatasampler")
+library(knitr)
+library(broom)
+library(investr)
+```
+# Background: 
+**NLS: Non-linear Least Squares**
+But first, remember what **OLS (ordinary least squares)** does
+Fundamental objective of OLS regression: 
+- best fit line to data
+- minimize the squared error (aka residuals)
+- linear relationship between predictor (y) and variables (x)
+
+**NLS**
+Same idea of least squares error minimization, but with any function (linear or exp. or log, etc)
+- iteratively approximate the solutions through algorithms
+  - Gauss-Newton (most common)
+  - Levenberg-MArquardt (more flexible)
+- algorithms are trying to make approximation of the funcitons' gradient and then move along until some `convergence criteria` is met. (previous squared error - updated squared error <0.001; the convergence criteria is 0.001)
+
+**Why should we use NLS?**
+- need far fewer assumptions than even multiple regression
+  - residuals *do not* have to be normally distributed
+  - NO linear relationship required
+  - *do not* care about homoscedasticity (where residual errors spread out in the variance)
+- if the underlying model is smooth (nice approximation of a funciton), can find solutions accurately and quickly
+
+**When to use NLS?**
+- Best suited for specific model parameterization given a collection of data
+- When you have a *known* equation and wan to fit parameters
+- There is no R^2 value in NLS to compare across model specificaitons, but we can still test model performance using AIC or Cross fold Validation through RMSE
+- NLS is very helpful for *time series* 
+- **NLS is only as good as the underlying model** need to choose a model that is appropriate and representative of the data in order to get a good solution.
+
+# LETS USE NLS!
+
+df_nls <- nls(`formula = ` # model we want to estimate,
+                 `data` # data we are evaluating
+               `start` # our initial guesses
+               `control` # List of tolerance value, etc,
+               `trace` # do we want to see convergence
+               `upper` # bounds on input paramenters
+               `...` # some other useful stuff)` 
+
+**What model should we use?**
+- scour literature to figure out which model is best in the instance you are trying to recreate
+- if you're an expert make your own model
+- usually you find a model someone has already made!
+
+For bison data we will use the model `BM = b1 * exp(-exp(-b2 * (age - b3)))` where BM = body mass (dependent variable), b1 = asymptotic body mass, b2 = instantaneous growth rate, b3 = age at inflection point years, age = independent variable
+
+Create a funciton in R to house model
+1) State what variables you want in the model (b1, b2, b3, age)
+2) Within the {} tell the equation you want 
+gompertz <- function(b1, b2, b3, age){
+  BM = b1*exp(-exp(-b2*(age-b3)))
+  return(BM)
+}
+
+Now that model is defined, plug it in to `nls()`
+df_nls <- nls(animal_weight ~ gompertz(b1, b2, b3, animal_age),
+              data = knz_bison_age,
+              start = list (b1 = ?, b2 = ?, b3 = ?),
+              trace = TRUE)
+
+**But how do you "guess"??**
+- Use parameters from similar studies
+- Use data to internally define guesses (min, max, mean, etc.)
+- Look at graphs and estimate
+
+b1 implies a max body length 
+b3 is where the curve starts bending
+b2 (instantaneous growth rate) kind of weird, but you could manipulate the b2 parameter to see how it changes the shape and try to find b2 that way
+
+b_gompertz <- nls(animal_weight ~ gompertz(b1, b2, b3, animal_age),
+              data = knz_bison_age,
+              start = list (b1 = 1000, b2 = 1, b3 = 0.6),
+              trace = TRUE)
+
+use broom::augment() to plot the differences
+use as_tibble(predFit( interval = "confidence") to find confidence intervals
+
+
+**Optimization across R**
+NLS is an optimization tool
+
+
+
