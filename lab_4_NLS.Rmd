@@ -154,20 +154,22 @@ plots <- fox_all %>%
   head(5) %>%
   mutate(graph = map2(data, predictions, ~ggplot() + 
                         geom_point(data = .x, aes(x = .x$year, y = .x$surplus, color = "Actual")) +
-                        geom_point(aes(x = .x$year, y = .y, color = "Predicted"))) +
+                        geom_point(aes(x = .x$year, y = .y, color = "Predicted")) +
            theme_minimal() +
            xlab("Year") +
            ylab("Surplus") +
-           scale_Color_manual(name = "Legend", breaks = c("Actual", "Predicted"), values = c("Actual" = "black", "Predicted" = "red")))
+           scale_color_manual(name = "Legend", breaks = c("Actual", "Predicted"), values = c("Actual" = "black", "Predicted" = "red"))))
 
 legend <- get_legend(plots$graph[[1]])
 
-for(i in 1:length(plots$graph))[
+for(i in 1:length(plots$graph)){
   plots$graph[[i]] <- plots$graph[[i]] +theme(legend.position = "none")
-]
+}
+
+plot_list = plots$graph
 
 plot_list[[6]] <- legend
-plot_grid(plotlist = plots_list, labels = c(plots$stockid, ""), hjust = -0.5)
+plot_grid(plotlist = plot_list, labels = c(plots$stockid, ""), hjust = -0.5)
 
 ```
 
