@@ -1,0 +1,298 @@
+---
+title: 'Lab 3: Binary Logisitc Regression'
+author: "Sachiko Lamen"
+date: "2/2/2022"
+output: html_document
+---
+
+```{r setup, include=TRUE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning= FALSE, message = FALSE)
+
+library(tidyverse)
+library(palmerpenguins)
+library(GGally)
+library(broom)
+library(jtools)
+library(caret) # use to automate cross validation
+library(AICcmodavg)
+```
+
+Binary logistic regression - two mutually exclusive outcomes
+Multinomial logistic - more than two mutually exclusive outcomes
+ordinal logistic regression - ordinal categorical variable (ex low medium high)
+
+In this lab we will find the probabilities that a given penguin falls into Adelie or Chinstrap based on predictor variables (characteristics)
+
+## Binary Logistic Regression
+What is the probability it is Adelie? What is the probability it is Chinstrap?
+
+##### Explore data using `GGally::ggpairs`
+
+```{r}
+penguins %>%
+  select(species, bill_length_mm:sex) %>%
+  ggpairs(aes(color = species))
+```
+
+##### Make a subset of Chinstrap and Adelie
+> class(penguins$species)
+[1] "factor"
+> levels(penguins$species)
+[1] "Adelie"    "Chinstrap" "Gentoo"  
+
+```{r}
+adelie_chinstrap <- penguins %>%
+  filter(species %in% c("Adelie", "Chinstrap")) %>%
+  mutate(species = fct_drop(species)) %>% # drops gentoo completely
+  select(-island, -year) %>%
+  drop_na()
+```
+> levels(adelie_chinstrap$species)
+[1] "Adelie"    "Chinstrap"
+
+Let's check some trends for variables for these two species
+```{r}
+ggplot(data = adelie_chinstrap, aes(x = body_mass_g, y = flipper_length_mm)) +
+  geom_point(aes(color = sex)) +
+  facet_wrap(~species)
+
+ggplot(data = adelie_chinstrap, aes(x = body_mass_g, y = bill_length_mm)) +
+  geom_point(aes(color = sex)) +
+  facet_wrap(~species)
+```
+
+#### Logisitc Regression in R
+
+```{r}
+# first write a formula for the regression (we will use again later for cross validation)
+f1 <- species ~ body_mass_g + flipper_length_mm + sex
+
+# use glm() generalized linear model -- set to binomial
+ad_chin_blr1 <- glm(formula = f1,
+                    data = adelie_chinstrap,
+                    family = "binomial")
+```
+
+look at the results:
+```{r}
+ad_chin_blr1
+summary(ad_chin_blr1)
+# for every gram of additional body mass it makes it slightly less likely that the penguin is a Chinstrip
+# for every addition mm of flipper length it makes it slightly more likely that the penguin is a chinstrap
+# if your species is male compared to the reference level of female, there is a slight decrease that the penguin is a chinstrap ** this doesnt exactly make sense
+```
+> levels(adelie_chinstrap$species)
+[1] "Adelie"    "Chinstrap"
+^^ this is important because it tells you the reference level. Adelie is the reference level because it comes first! Adelie coded as 0, Chinstrap coded as 1. 
+
+```{r}
+# create tidy data frame of summary statistics, use to compare to initial `GGally::ggpairs` graph
+blr1_tidy <- broom::tidy(ad_chin_blr1)
+```
+
+```{r}
+ggplot(data = adelie_chinstrap, aes(x = species, y = body_mass_g)) +
+  geom_jitter(aes(color = sex))
+
+ggplot(data = adelie_chinstrap, aes(x = species, y = flipper_length_mm)) +
+  geom_jitter(aes(color = sex))
+```
+Changes in log odds are difficult to interpret, so we want to convert it into a actual probability...
+```{r}
+blr1_fitted <- ad_chin_blr1 %>%
+  broom::augment(type.predict = "response") #instead of predicting log odds, take them and convert into probability
+
+# look at .fitted column values are probability
+```
+
+
+Lets plot the probabilities based on flipper length
+```{r}
+ggplot(data = blr1_fitted, aes(x = flipper_length_mm, y = .fitted)) +
+  geom_point(aes(color = sex, shape = species)) + # use shape to see if graph is accurately predicting species probability
+  geom_smooth(aes(color = sex), se = FALSE) + # add general trendline, remove std error bars
+  labs(x = "Flipper Length (mm)",
+       y = "Probability of outcome 'Chinstrap'")
+
+# as flipper length gets smaller predicts low probability that pengins are chinstrap, at long flipper lengths, predicts higher probability of chinstrap
+```
+
+Visualize model outcomes using `jtools::effect_plot()` shows how prediciton varies based on given variable
+
+```{r}
+effect_plot(ad_chin_blr1,
+            pred = flipper_length_mm,
+            interval = TRUE,
+            y.label = "Probability of Chinstrap")
+
+# effect of flipper length on the probability of chinstrap. Lower values of flipper length gnerally will lead to predicitons of adelie, higher will lead to predictions of chinstrap
+
+effect_plot(ad_chin_blr1,
+            pred = body_mass_g,
+            interval = TRUE,
+            y.label = "Probability of Chinstrap")
+```
+
+##### Predict species based on new values
+
+What is the probability that a female penguin with 3410 g of body mass and flipper length of 192 mm will be "Chinstrap"?
+
+```{r}
+ex1 <- predict(ad_chin_blr1,
+               data.frame(sex = "female",
+                          body_mass_g = 3410,
+                          flipper_length_mm = 192),
+               type = "response") # convert log odds into probability
+
+# result = 0.403 --- 40% chance this penguin is a chinstrap
+```
+
+Lets do a prediction for multiple penguins!
+```{r}
+new_df <- data.frame(
+  sex = c("male", "male", "female"),
+  body_mass_g = c(3298, 4100, 3600),
+  flipper_length_mm = c(212, 175, 180)
+)
+
+ex2 <- predict(ad_chin_blr1,
+               new_df,
+               type = "response")
+```
+
+
+#### New model based on bill length
+
+```{r}
+f2 <- species ~ bill_length_mm + body_mass_g
+
+ad_chin_blr2 <- glm(formula = f2,
+                    data = adelie_chinstrap,
+                    family = "binomial")
+```
+
+```{r}
+# look at the model coefficients and AIC
+ad_chin_blr2
+summary(ad_chin_blr2)
+```
+```{r}
+ggplot(data = adelie_chinstrap, aes(x = bill_length_mm, y = body_mass_g)) +
+  geom_point(aes(color = species))
+```
+```{r}
+effect_plot(ad_chin_blr2,
+            pred = bill_length_mm,
+            interval = TRUE,
+            y.label = "Probability of 'Chinstrap'")
+
+effect_plot(ad_chin_blr2,
+            pred = body_mass_g,
+            interval = TRUE,
+            y.label = "Probability of 'Chinstrap'")
+
+# these two graphs make it look like this model has a pretty sure prediction of adelie v chinstrap
+```
+
+### Compare the two models : Model Selection
+
+Look at AIC Values
+```{r}
+AICcmodavg::aictab(list(ad_chin_blr1, ad_chin_blr2))
+
+# says model 2 is better and model 1 is much worse. ∆AIC is so big meaning model 1 is way worse.
+```
+
+#### Lets do 10-fold cross validation 
+Use predition accuracy as our metric
+
+```{r}
+set.seed(123)
+
+n_folds <- 10
+folds <- rep(1:n_folds, length.out = nrow(adelie_chinstrap)) # length.out creates a vector of same length as dataframe
+
+ad_chin_kfold <- adelie_chinstrap %>%
+  mutate(fold = sample(folds, size = n(), replace = FALSE))
+```
+
+```{r}
+# create function where x = known value and y = predicted value
+pred_acc <- function(x,y){
+  accurate <- ifelse(x == y, 1,0) # take string of x's and compare to string of y's and say "this one matches if theres a 1, or it doesnt match if there's a 0
+  return(mean(accurate, na.rm = TRUE))
+}
+```
+
+```{r}
+results_df <- data.frame()
+
+for(i in 1:n_folds) {
+  kfold_test <- ad_chin_kfold %>%
+    filter(fold == i) # fold is equal to the current iteration "i"
+  kfold_train <- ad_chin_kfold %>%
+    filter(fold != i)
+  
+  kfold_blr1 <- glm(f1, data = kfold_train, family = "binomial")
+  kfold_blr2 <- glm(f2, data = kfold_train, family = "binomial")
+  
+  kfold_pred <- kfold_test %>%
+    mutate(blr1 = predict(kfold_blr1, kfold_test, type = "response"),
+           blr2 = predict(kfold_blr2, kfold_test, type = "response")) %>%
+    mutate(pred1 = ifelse(blr1 > .50, "Chinstrap", "Adelie"),
+           pred2 = ifelse(blr2 > .50, "Chinstrap", "Adelie"))
+  kfold_accuracy <- kfold_pred %>%
+    summarize(blr1_ac = pred_acc(species, pred1),
+              blr2_ac = pred_acc(species, pred2))
+  
+  results_df <- bind_rows(results_df, kfold_accuracy)
+}
+
+results_df %>%
+  summarize(blr1_acc = mean(blr1_ac),
+            blr2_acc = mean(blr2_ac))
+```
+
+Use the `caret` package (classification and regression training) to automate the cross-validation training
+```{r}
+set.seed(123)
+
+tr_ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+
+## train the model to do cross validation on 10 folds on adelie_chinstrap dataset 
+model1 <- train(f1, data = adelie_chinstrap,
+                method = 'glm', family = "binomial", 
+                trControl = tr_ctrl)
+model1
+
+model2 <- train(f2, data = adelie_chinstrap,
+                method = 'glm', family = "binomial", 
+                trControl = tr_ctrl)
+model2
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
