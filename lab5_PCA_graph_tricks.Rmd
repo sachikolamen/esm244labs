@@ -1,0 +1,169 @@
+---
+title: 'ESM 244: Lab 5 - PCA'
+author: "Sachiko Lamen"
+date: "2/3/2022"
+output: html_document
+---
+
+```{r setup, include=TRUE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(here)
+
+### for part 1: PCA
+library(ggfortify)
+library(palmerpenguins)
+library(patchwork)
+
+### for part 2: ggplot customization
+library(readxl)
+library(gghighlight)
+library(lubridate)
+library(plotly)
+```
+
+# Part 1: PCA (Principal Components Analysis)
+A way to take a multivariate data set and get as much information as possible in a consice way. Gives you idea about the importance of variables. 
+
+```{r}
+penguin_clean <- penguins %>%
+  drop_na()
+# need to drop NA values or PCA analysis wont run
+
+# create PCA object (contains a bunch of information within the model object that we can use for different purposes)
+# we can only give this function NUMERIC data, so need to get rid of non-numeric variables from the ENTIRE  dataframe!!
+penguin_pca <- penguin_clean %>%
+  select(body_mass_g, ends_with('_mm')) %>% # ends_with selects all columns that end with... '_mm'
+  scale() %>%
+  prcomp()
+           
+# in console: View(penguin_pca) to see std deviations
+penguin_pca$rotation # to see rotation values
+penguin_pca$sdev #to see just std deviations
+penguin_pca$x # where variables would fall in each principal component
+```
+
+## Biplot by hand
+
+```{r}
+loadings_df <- data.frame(penguin_pca$rotation) %>%
+  mutate(axis = row.names(.)) # . = take the info from above and put it in the parentheses
+# need row names, create new column
+
+new_pts_df <- data.frame(penguin_pca$x)
+
+ggplot() +
+  geom_point(data = new_pts_df, aes(x = PC1, y = PC2), color = 'blue') +
+  geom_segment(data = loadings_df, x = 0, y = 0,
+               aes(xend = PC1, yend = PC2, group = axis),
+               arrow = arrow(length = unit(.25, 'cm'))) +
+  geom_text(data = loadings_df, aes(x = PC1, y = PC2, label = axis),
+            vjust = 0, nudge_y = .02) +  #vjust = vertical justification of labels 0 = at the bottom of the arrow, nudge_y = nudge upward just a little
+  theme_minimal()
+```
+### Biplot Automated
+```{r}
+autoplot(penguin_pca, 
+         data = penguin_clean,
+         loadings = TRUE, # will show arrows
+         colour = "species", # have to spell colour because package is old
+         loadings.label = TRUE,
+         loadings.colour = 'black',
+         loadings.label.colour = 'black',
+         loadings.label.vjust = -.5) +
+  scale_color_manual(values = c('blue', 'purple', 'orange')) + 
+  theme_minimal()
+```
+
+## Screeplot by hand
+
+```{r}
+# make vector of std deviations from PCA
+sd_vec <- penguin_pca$sdev
+
+# need variance for screeplot so convert sd -> variance
+var_vec <- sd_vec^2
+
+pc_names <- colnames(penguin_pca$rotation)
+
+# make percent of variance explained df
+pct_expl_df <- data.frame(v = var_vec,
+                          pct_v = var_vec/sum(var_vec),
+                          pc = fct_inorder(pc_names)) %>%
+  mutate(pct_lbl = paste0(round(pct_v * 100, 1), '%'))
+
+ggplot(pct_expl_df, aes( x = pc, y = v)) +
+  geom_col() + 
+  geom_text(aes(label = pct_lbl), vjust = 0, nudge_y = .005) %>%
+  labs(x= "Principal component", y = "Variance explained")
+# vertical bars say HOW MUCH VARIANCE, Labels = what percent of the total variance is captured
+  
+```
+
+## Screeplot Automated
+```{r}
+# use screeplot() to take PCA object and quickly graph into screeplot (quick version of above)
+# can specifiy different types
+screeplot(penguin_pca, type = "lines")
+screeplot(penguin_pca, type = "barplot")
+```
+
+
+# Part 2: ggplot customization, reading in different file types
+
+```{r}
+# read in and clean data
+fish_noaa <-read_excel(here("foss_landings.xlsx")) %>% 
+  janitor::clean_names() %>% 
+  mutate(across(where(is.character), tolower))  %>%# mutate across multiple columns where is.character is TRUE and make it lowercase (converts values to all lowercase if they are character value)
+  mutate(nmfs_name = str_sub(nmfs_name, end = -4)) %>% # deletes ** from end of nmfs_name values
+  filter(confidentiality == "public")
+```
+
+```{r}
+fish_plot <- ggplot(data = fish_noaa, aes(x = year, y = pounds, group = nmfs_name)) +
+  geom_line(aes(color = nmfs_name)) + 
+  theme_minimal()
+ 
+# interactive plot! 
+ggplotly(fish_plot)
+
+
+# gghighlight
+ggplot(data = fish_noaa, aes(x = year, y = pounds, group = nmfs_name)) +
+  geom_line() +
+  gghighlight(nmfs_name == 'rockfishes') + # highlight based on rockfishes
+  theme_minimal()
+
+ggplot(data = fish_noaa, aes(x = year, y = pounds, group = nmfs_name)) +
+  geom_line(aes(color = nmfs_name)) +
+  gghighlight(max(pounds) > 1e8) + # this will highlight based on max catch
+  theme_minimal()
+```
+
+## Read in data straight from the web!?! and practice lubridate
+lubridate helps you more easily manage dates in different formats
+```{r}
+monroe_wt <- read_csv("https://raw.githubusercontent.com/oharac/esm244_w22_lab5/master/data/MWTP_Elec_Daily.csv") %>% janitor::clean_names()
+
+# date format is not good, need to reformat:
+monroe_ts <- monroe_wt %>%
+  mutate(date = lubridate::mdy(date))  %>% # check using `class(monroe_ts$date)`
+  mutate(record_month = lubridate::month(date), # new column with month number pulled from the date column
+         month_name = month.abb[record_month]) %>% # month.abb = abbreviations of months, use [] to locate index
+  mutate(month_name = fct_reorder(month_name, record_month)) # reorders month names in order of month number
+
+ggplot(data = monroe_ts, aes(x = month_name, y = total_kwh)) +
+  geom_jitter(aes(color = month_name),
+              show.legend = FALSE,
+              alpha = 0.5,
+              size = 0.3,
+              width = 0.2) +
+  theme_classic()
+
+```
+
+
+
+
+
